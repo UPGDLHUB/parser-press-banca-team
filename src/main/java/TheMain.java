@@ -2,12 +2,7 @@ import java.io.File;
 import java.io.IOException;
 import java.util.Vector;
 
-/**
- * Main class to run the lexer
- *
- * @author javiergs
- * @version 1.0
- */
+
 public class TheMain {
 	
 	public static void main(String[] args) throws IOException {
