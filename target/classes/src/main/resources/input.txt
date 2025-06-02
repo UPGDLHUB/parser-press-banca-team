@@ -1,0 +1,38 @@
+class Employee {
+    int age;
+    float salary;
+    int yearsOfExperience;
+    boolean isEligible;
+    String result;
+
+    void evaluate() {
+        age = 30;
+        salary = 4800.50f;
+        yearsOfExperience = 5;
+        result = "";
+
+        isEligible = checkAge() && checkSalary() && checkExperience();
+        result = generateMessage(isEligible);
+    }
+
+    boolean checkAge() {
+        return age >= 25 && age <= 60;
+    }
+
+    boolean checkSalary() {
+        int roundedSalary = (int) salary;
+        return salary >= 4000.0f && roundedSalary % 2 == 0;
+    }
+
+    boolean checkExperience() {
+        return yearsOfExperience >= 3;
+    }
+
+    String generateMessage(boolean status) {
+        if (status == true) {
+            return "Employee is eligible for promotion.";
+        } else {
+            return "Employee is not eligible.";
+        }
+    }
+}

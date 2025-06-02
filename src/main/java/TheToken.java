@@ -1,9 +1,12 @@
 /**
- * A Token is a pair of a value (string or word) and its type
  *
- * @author javiergs
- * @version 1.0
+ * @author GABRIEL ZAID
+ *         ISAC HUMBERTO
+ *         BRANDON MAGANA
+ * @version 0.5
  */
+
+ 
 public class TheToken {
 	
 	private String value;

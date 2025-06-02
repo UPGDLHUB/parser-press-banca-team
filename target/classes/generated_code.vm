@@ -1,0 +1,77 @@
+age,int,global,0
+salary,float,global,0
+yearsOfExperience,int,global,0
+isEligible,boolean,global,0
+result,String,global,""
+roundedSalary,int,checkSalary,0
+@
+lit 0,0
+sto age,0
+lit 0.0,0
+sto salary,0
+lit 0,0
+sto yearsOfExperience,0
+lit 0,0
+sto isEligible,0
+lit "",0
+sto result,0
+evaluate:
+lit 30,1
+sto age,1
+sto salary,1
+lit 5,1
+sto yearsOfExperience,1
+lit "",1
+sto result,1
+call checkAge
+call checkSalary
+opr 9,1
+call checkExperience
+opr 9,1
+sto isEligible,1
+lod isEligible,1
+call generateMessage
+sto result,1
+opr 1,1
+checkAge:
+lod age,1
+lit 25,1
+opr 21,1
+lod age,1
+lit 60,1
+opr 22,1
+opr 9,1
+opr 1,1
+lit 0,1
+opr 1,1
+checkSalary:
+sto roundedSalary,1
+lod salary,1
+opr 21,1
+opr 1,1
+lit 0,1
+opr 1,1
+checkExperience:
+lod yearsOfExperience,1
+lit 3,1
+opr 21,1
+opr 1,1
+lit 0,1
+opr 1,1
+generateMessage:
+lit 0,1
+sto status,1
+lod status,1
+lit 1,1
+opr 13,1
+jpc ELSE_0
+lit "Employee is eligible for promotion.",1
+opr 1,1
+jmp ENDIF_0
+ELSE_0:
+lit "Employee is not eligible.",1
+opr 1,1
+ENDIF_0:
+lit 0,1
+opr 1,1
+opr 0,1

@@ -1,0 +1,24 @@
+y,int,method1,0
+x,int,method1,0
+sum,int,method1,0
+@
+method1:
+lit 0,1
+sto x,1
+lit 0,1
+sto y,1
+lit 1,1
+sto x,1
+lit 2,1
+sto y,1
+lit 0,1
+sto sum,1
+lod x,1
+lod y,1
+opr 2,1
+sto sum,1
+lit "Hello World",1
+call print
+opr 1,1
+opr 1,1
+opr 0,1

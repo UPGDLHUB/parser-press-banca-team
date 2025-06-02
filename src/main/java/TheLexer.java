@@ -7,8 +7,6 @@ import java.util.Set;
 import java.util.Vector;
 
 /**
- * Lexer class to analyze the input file
- * This version correctly handles token splitting and error identification
  *
  * @author GABRIEL ZAID
  *         ISAC HUMBERTO
@@ -25,7 +23,7 @@ public class TheLexer {
 
     static {
         KEYWORDS = new HashSet<>();
-        String[] keywords = {"if", "else", "while", "for", "class", "public", "private", "protected", "void", "int", "float", "double", "boolean", "string", "return"};
+        String[] keywords = {"if", "else", "while", "for", "class", "public", "private", "protected", "void", "int", "float", "double", "boolean", "string", "return", "true", "false"};
         for (String keyword : keywords) {
             KEYWORDS.add(keyword);
         }
@@ -51,39 +49,33 @@ public class TheLexer {
     }
 
     private void initializeAutomata() {
-        // Identificadores - Add $ as valid identifier character
         addLetterTransitions("START", "ID");
         dfa.addTransition("START", "_", "ID");
-        dfa.addTransition("START", "$", "ID"); // Add $ as valid identifier start
+        dfa.addTransition("START", "$", "ID");
         addLetterTransitions("ID", "ID");
         addDigitTransitions("ID", "ID");
         dfa.addTransition("ID", "_", "ID");
-        dfa.addTransition("ID", "$", "ID"); // Allow $ in identifiers
+        dfa.addTransition("ID", "$", "ID");
         
-        // Números
         addDigitTransitions("START", "NUM");
         addDigitTransitions("NUM", "NUM");
         dfa.addTransition("NUM", ".", "FLOAT_START");
         addDigitTransitions("FLOAT_START", "FLOAT");
         addDigitTransitions("FLOAT", "FLOAT");
         
-        // Hexadecimales
         dfa.addTransition("START", "0", "HEX_START");
         dfa.addTransition("HEX_START", "x", "HEX");
         dfa.addTransition("HEX_START", "X", "HEX");
         addHexTransitions("HEX", "HEX");
         
-        // Binarios
         dfa.addTransition("HEX_START", "b", "BIN");
         dfa.addTransition("HEX_START", "B", "BIN");
         dfa.addTransition("BIN", "0", "BIN");
         dfa.addTransition("BIN", "1", "BIN");
         
-        // Octales
         addOctalTransitions("HEX_START", "OCT");
         addOctalTransitions("OCT", "OCT");
         
-        // Strings
         dfa.addTransition("START", "\"", "STRING");
         dfa.addTransition("STRING", "\"", "STRING_ACCEPT");
 
@@ -93,29 +85,24 @@ public class TheLexer {
             }
         }
         
-        // Chars - Improved to better handle errors
         dfa.addTransition("START", "'", "CHAR");
         for (int i = 32; i < 127; i++) {
-            if (i != 39) { // except single quote
+            if (i != 39) {
                 dfa.addTransition("CHAR", String.valueOf((char)i), "CHAR_CONTENT");
             }
         }
         dfa.addTransition("CHAR_CONTENT", "'", "CHAR_ACCEPT");
         
-        // Operadores
         for (Character op : OPERATORS) {
             dfa.addTransition("START", op.toString(), "OP_ACCEPT");
         }
         
-        // Operadores compuestos
-        dfa.addTransition("OP_ACCEPT", "=", "OP_ACCEPT"); // Para operadores como +=, -=, etc.
+        dfa.addTransition("OP_ACCEPT", "=", "OP_ACCEPT");
         
-        // Delimitadores
         for (Character delim : DELIMITERS) {
             dfa.addTransition("START", delim.toString(), "DELIM_ACCEPT");
         }
         
-        // Estados de aceptación
         dfa.addAcceptState("ID", "IDENTIFIER");
         dfa.addAcceptState("NUM", "INTEGER");
         dfa.addAcceptState("FLOAT", "FLOAT");
@@ -172,15 +159,31 @@ public class TheLexer {
     private void processLine(String line) {
         int i = 0;
         while (i < line.length()) {
-            // Skip whitespace
             if (isWhitespace(line.charAt(i))) {
                 i++;
                 continue;
             }
             
-            // Check if character is an operator or delimiter (splitting characters)
+            if (line.charAt(i) == '"') {
+                i = processStringLiteral(line, i);
+                continue;
+            }
+            
+            if (line.charAt(i) == '\'') {
+                i = processCharLiteral(line, i);
+                continue;
+            }
+            
+            if (i + 1 < line.length()) {
+                String compound = line.substring(i, i + 2);
+                if (isCompoundOperator(compound)) {
+                    tokens.add(new TheToken(compound, "OPERATOR"));
+                    i += 2;
+                    continue;
+                }
+            }
+            
             if (isDelimiterOrOperator(line.charAt(i))) {
-                // Process the delimiter or operator as a token
                 String currentState = "START";
                 String nextState = dfa.getNextState(currentState, line.charAt(i));
                 if (nextState != null) {
@@ -197,102 +200,127 @@ public class TheLexer {
                 continue;
             }
             
-            // Process tokens that are not delimiters or operators
-            StringBuilder lexeme = new StringBuilder();
-            String currentState = "START";
-            boolean isError = false;
+            i = processRegularToken(line, i);
+        }
+    }
+    
+    private int processStringLiteral(String line, int startPos) {
+        StringBuilder lexeme = new StringBuilder();
+        lexeme.append('"');
+        int i = startPos + 1;
+        
+        while (i < line.length()) {
+            char c = line.charAt(i);
+            lexeme.append(c);
             
-            int startPos = i;
+            if (c == '"') {
+                tokens.add(new TheToken(lexeme.toString(), "STRING"));
+                return i + 1;
+            }
+            i++;
+        }
+        
+        tokens.add(new TheToken(lexeme.toString(), "ERROR"));
+        return i;
+    }
+    
+    private int processCharLiteral(String line, int startPos) {
+        StringBuilder lexeme = new StringBuilder();
+        lexeme.append('\'');
+        int i = startPos + 1;
+        
+        if (startPos > 0 && (line.charAt(startPos - 1) == 'b' || line.charAt(startPos - 1) == 'B')) {
+            return startPos;
+        }
+        
+        if (i < line.length()) {
+            char content = line.charAt(i);
+            lexeme.append(content);
+            i++;
             
-            // Special handling for character literals (improved)
             if (i < line.length() && line.charAt(i) == '\'') {
                 lexeme.append('\'');
                 i++;
-                
-                // Valid char has exactly one character between quotes
-                if (i < line.length()) {
-                    char content = line.charAt(i);
-                    lexeme.append(content);
-                    i++;
-                    
-                    // Check for closing quote
-                    if (i < line.length() && line.charAt(i) == '\'') {
-                        lexeme.append('\'');
-                        i++;
-                        tokens.add(new TheToken(lexeme.toString(), "CHAR"));
-                    } else {
-                        // Continue consuming until whitespace/delimiter to complete the error token
-                        while (i < line.length() && !isWhitespace(line.charAt(i)) && 
-                               !isDelimiterOrOperator(line.charAt(i))) {
-                            lexeme.append(line.charAt(i));
-                            i++;
-                        }
-                        tokens.add(new TheToken(lexeme.toString(), "ERROR"));
-                    }
-                } else {
-                    // Unclosed quote
-                    tokens.add(new TheToken(lexeme.toString(), "ERROR"));
-                }
-                continue;
-            }
-            
-            // Special case for b' which should be ERROR
-            if (i + 1 < line.length() && 
-                (line.charAt(i) == 'b' || line.charAt(i) == 'B') && 
-                line.charAt(i + 1) == '\'') {
-                lexeme.append(line.charAt(i));
-                lexeme.append('\'');
-                i += 2;
-                
-                // Continue consuming until whitespace/delimiter to complete the error token
-                while (i < line.length() && !isWhitespace(line.charAt(i)) && 
-                       !isDelimiterOrOperator(line.charAt(i))) {
-                    lexeme.append(line.charAt(i));
-                    i++;
-                }
-                tokens.add(new TheToken(lexeme.toString(), "ERROR"));
-                continue;
-            }
-            
-            // Regular token processing
-            while (i < line.length()) {
-                char currentChar = line.charAt(i);
-                
-                // Break on whitespace or delimiters/operators
-                if (isWhitespace(currentChar) || isDelimiterOrOperator(currentChar)) {
-                    break;
-                }
-                
-                String nextState = dfa.getNextState(currentState, currentChar);
-                
-                if (nextState == null) {
-                    // If no valid transition, mark as error
-                    isError = true;
-                }
-                
-                lexeme.append(currentChar);
-                if (nextState != null) {
-                    currentState = nextState;
-                }
-                
-                i++;
-            }
-            
-            // Process the accumulated lexeme
-            String lexemeStr = lexeme.toString();
-            if (!lexemeStr.isEmpty()) {
-                if (isError || !dfa.isAcceptState(currentState)) {
-                    tokens.add(new TheToken(lexemeStr, "ERROR"));
-                } else {
-                    String type = dfa.getAcceptStateName(currentState);
-                    // Check if identifier is actually a keyword
-                    if (type.equals("IDENTIFIER") && KEYWORDS.contains(lexemeStr)) {
-                        type = "KEYWORD";
-                    }
-                    tokens.add(new TheToken(lexemeStr, type));
-                }
+                tokens.add(new TheToken(lexeme.toString(), "CHAR"));
+                return i;
             }
         }
+        
+        while (i < line.length() && !isWhitespace(line.charAt(i)) && 
+               !isDelimiterOrOperator(line.charAt(i))) {
+            lexeme.append(line.charAt(i));
+            i++;
+        }
+        tokens.add(new TheToken(lexeme.toString(), "ERROR"));
+        return i;
+    }
+    
+    private int processRegularToken(String line, int startPos) {
+        StringBuilder lexeme = new StringBuilder();
+        String currentState = "START";
+        boolean isError = false;
+        int i = startPos;
+        
+        if (i + 1 < line.length() && 
+            (line.charAt(i) == 'b' || line.charAt(i) == 'B') && 
+            line.charAt(i + 1) == '\'') {
+            lexeme.append(line.charAt(i));
+            lexeme.append('\'');
+            i += 2;
+            
+            while (i < line.length() && !isWhitespace(line.charAt(i)) && 
+                   !isDelimiterOrOperator(line.charAt(i))) {
+                lexeme.append(line.charAt(i));
+                i++;
+            }
+            tokens.add(new TheToken(lexeme.toString(), "ERROR"));
+            return i;
+        }
+        
+        while (i < line.length()) {
+            char currentChar = line.charAt(i);
+            
+            if (isWhitespace(currentChar) || isDelimiterOrOperator(currentChar)) {
+                break;
+            }
+            
+            String nextState = dfa.getNextState(currentState, currentChar);
+            
+            if (nextState == null) {
+                isError = true;
+            }
+            
+            lexeme.append(currentChar);
+            if (nextState != null) {
+                currentState = nextState;
+            }
+            
+            i++;
+        }
+        
+        String lexemeStr = lexeme.toString();
+        if (!lexemeStr.isEmpty()) {
+            if (isError || !dfa.isAcceptState(currentState)) {
+                tokens.add(new TheToken(lexemeStr, "ERROR"));
+            } else {
+                String type = dfa.getAcceptStateName(currentState);
+                if (type.equals("IDENTIFIER") && KEYWORDS.contains(lexemeStr)) {
+                    type = "KEYWORD";
+                }
+                tokens.add(new TheToken(lexemeStr, type));
+            }
+        }
+        
+        return i;
+    }
+    
+    private boolean isCompoundOperator(String op) {
+        return op.equals("&&") || op.equals("||") || op.equals("==") || 
+               op.equals("!=") || op.equals("<=") || op.equals(">=") ||
+               op.equals("++") || op.equals("--") || op.equals("+=") ||
+               op.equals("-=") || op.equals("*=") || op.equals("/=") ||
+               op.equals("%=") || op.equals("&=") || op.equals("|=") ||
+               op.equals("^=") || op.equals("<<") || op.equals(">>");
     }
 
     private boolean isWhitespace(char c) {

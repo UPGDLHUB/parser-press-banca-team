@@ -1,232 +1,391 @@
-import java.util.Vector;
+import java.util.*;
 
 /**
- * Parser class for a Java subset
- */
-
-/**
- * Parser class to analyze rules
  *
  * @author GABRIEL ZAID
  *         ISAC HUMBERTO
  *         BRANDON MAGANA
  * @version 0.5
  */
+
 public class TheParser {
     private Vector<TheToken> tokens;
     private int currentToken;
-    
+    private Map<String, Set<String>> firstSets = new HashMap<>();
+    private Map<String, Set<String>> followSets = new HashMap<>();
+    private CodeGenerator codeGen;
+
     public TheParser(Vector<TheToken> tokens) {
         this.tokens = tokens;
         currentToken = 0;
+        this.codeGen = new CodeGenerator();
+        initializeFirstSets();
+        initializeFollowSets();
+    }
+
+    private void initializeFirstSets() {
+        firstSets.put("RULE_PROGRAM", new HashSet<>(Arrays.asList("class")));
+        firstSets.put("RULE_GLOBAL_ATTRIBUTE", new HashSet<>(Arrays.asList("int", "float", "double", "boolean", "String", "char")));
+        firstSets.put("RULE_METHOD", new HashSet<>(Arrays.asList("void", "int", "float", "double", "boolean", "String", "char")));
+    }
+
+    private void initializeFollowSets() {
+        followSets.put("RULE_PROGRAM", new HashSet<>(Collections.singletonList("$")));
+        followSets.put("RULE_GLOBAL_ATTRIBUTE", new HashSet<>(Arrays.asList("int", "float", "double", "boolean", "String", "char", "void", "}")));
+        followSets.put("RULE_METHOD", new HashSet<>(Arrays.asList("int", "float", "double", "boolean", "String", "char", "void", "}")));
+    }
+
+    private boolean checkFirst(String ruleName) {
+        Set<String> first = firstSets.getOrDefault(ruleName, new HashSet<>());
+        Set<String> follow = followSets.getOrDefault(ruleName, new HashSet<>());
+    
+        if (currentToken >= tokens.size()) {
+            if (first.contains("$")) return true;
+            reportError(ruleName + " expected end of input");
+            return false;
+        }
+    
+        String currentVal = tokens.get(currentToken).getValue();
+        if (first.contains(currentVal)) return true;
+    
+        reportError("Expected one of " + first + " for " + ruleName + ", found " + currentVal);
+        synchronize(ruleName, first, follow);
+        return currentToken < tokens.size() && first.contains(tokens.get(currentToken).getValue());
+    }
+    
+    private void synchronize(String ruleName, Set<String> first, Set<String> follow) {
+        while (currentToken < tokens.size()) {
+            String tokenVal = tokens.get(currentToken).getValue();
+            if (first.contains(tokenVal) || follow.contains(tokenVal)) break;
+            currentToken++;
+        }
+    }
+    
+    private void reportError(String message) {
+        System.out.println("Error: " + message);
     }
     
     public void run() {
         RULE_PROGRAM();
     }
+
+    public CodeGenerator getCodeGenerator() {
+        return codeGen;
+    }
     
     private void RULE_PROGRAM() {
-        System.out.println("- RULE_PROGRAM");
+        if (!checkFirst("RULE_PROGRAM")) return;
         match("class");
-        if (tokens.get(currentToken).getType().equals("IDENTIFIER")) currentToken++;
+        if (tokens.get(currentToken).getType().equals("IDENTIFIER")) {
+            currentToken++;
+        }
         match("{");
         while (!tokens.get(currentToken).getValue().equals("}")) {
             if (isType(tokens.get(currentToken).getValue())) {
-                RULE_GLOBAL_ATTRIBUTE();
-            } else {
+                int lookahead = currentToken + 1;
+                if (lookahead < tokens.size() && tokens.get(lookahead).getType().equals("IDENTIFIER")) {
+                    int lookahead2 = lookahead + 1;
+                    if (lookahead2 < tokens.size() && tokens.get(lookahead2).getValue().equals("(")) {
+                        RULE_METHOD();
+                    } else {
+                        RULE_GLOBAL_ATTRIBUTE();
+                    }
+                } else {
+                    reportError("Expected method name identifier");
+                    currentToken++;
+                }
+            }
+            else {
                 RULE_METHOD();
             }
         }
         match("}");
+        codeGen.generateHalt();
     }
     
     private void RULE_GLOBAL_ATTRIBUTE() {
-        System.out.println("-- RULE_GLOBAL_ATTRIBUTE");
+        if (!checkFirst("RULE_GLOBAL_ATTRIBUTE")) return;
+        String type = tokens.get(currentToken).getValue();
         RULE_TYPE();
-        if (tokens.get(currentToken).getType().equals("IDENTIFIER")) currentToken++;
+        if (tokens.get(currentToken).getType().equals("IDENTIFIER")) {
+            String varName = tokens.get(currentToken).getValue();
+            SemanticAnalyzer.CheckVariable(type, varName);
+            codeGen.setLevel(0);
+            codeGen.generateVariableDeclaration(type, varName, getDefaultValue(type));
+            currentToken++;
+        }
         match(";");
     }
     
+    
     private void RULE_METHOD() {
-        System.out.println("-- RULE_METHOD");
+        String returnType = "";
         if (tokens.get(currentToken).getValue().equals("void")) {
+            returnType = "void";
             currentToken++;
         } else {
+            returnType = tokens.get(currentToken).getValue();
             RULE_TYPE();
         }
-        if (tokens.get(currentToken).getType().equals("IDENTIFIER")) currentToken++;
+
+        String methodName = "";
+        if (tokens.get(currentToken).getType().equals("IDENTIFIER")) {
+            methodName = tokens.get(currentToken).getValue();
+            codeGen.addInstruction(methodName + ":");
+            currentToken++;
+        } else {
+            reportError("Expected method name identifier");
+        }
+
+        SemanticAnalyzer.setScope(methodName);
+        codeGen.setLevel(1);
+
         match("(");
         if (!tokens.get(currentToken).getValue().equals(")")) {
-            RULE_PARAMS();
+            RULE_PARAMS(); 
         }
         match(")");
         match("{");
         RULE_BODY();
         match("}");
+
+        if (!returnType.equals("void")) {
+            codeGen.generateLit("0");
+        }
+        codeGen.generateOpr(1); 
+        SemanticAnalyzer.setScope("global");
+
     }
-    
+
+
     private void RULE_TYPE() {
-        System.out.println("-- RULE_TYPE");
-        if (isType(tokens.get(currentToken).getValue())) currentToken++;
+        if (isType(tokens.get(currentToken).getValue())) {
+            currentToken++;
+        }
     }
     
-    private boolean isType(String value) {
-        return value.equals("int") || value.equals("float") || 
-               value.equals("double") || value.equals("boolean") || 
-               value.equals("String") || value.equals("char");
+    public boolean isType(String word) {
+    return word.equals("int") ||
+           word.equals("float") ||
+           word.equals("boolean") ||
+           word.equals("char") ||
+           word.equals("String") ||
+           word.equals("void");
+}
+
+    
+    private String getDefaultValue(String type) {
+        if (type.equals("boolean")) return "0";
+        if (type.equals("float") || type.equals("double")) return "0.0";
+        if (type.equals("String")) return "\"\"";
+        return "0";
     }
     
     private void RULE_PARAMS() {
-        System.out.println("-- RULE_PARAMS");
+        String paramType = tokens.get(currentToken).getValue();
         RULE_TYPE();
-        if (tokens.get(currentToken).getType().equals("IDENTIFIER")) currentToken++;
+        if (tokens.get(currentToken).getType().equals("IDENTIFIER")) {
+            String paramName = tokens.get(currentToken).getValue();
+            codeGen.generateVariableDeclaration(paramType, paramName, getDefaultValue(paramType));
+            currentToken++;
+        }
         while (tokens.get(currentToken).getValue().equals(",")) {
             currentToken++;
+            paramType = tokens.get(currentToken).getValue();
             RULE_TYPE();
-            if (tokens.get(currentToken).getType().equals("IDENTIFIER")) currentToken++;
+            if (tokens.get(currentToken).getType().equals("IDENTIFIER")) {
+                String paramName = tokens.get(currentToken).getValue();
+                codeGen.generateVariableDeclaration(paramType, paramName, getDefaultValue(paramType));
+                currentToken++;
+            }
         }
     }
     
     private void RULE_BODY() {
-        System.out.println("-- RULE_BODY");
-        while (!tokens.get(currentToken).getValue().equals("}")) {
-            if (isType(tokens.get(currentToken).getValue())) {
-                RULE_VARIABLE();
-            } else if (tokens.get(currentToken).getType().equals("IDENTIFIER")) {
-                String identifier = tokens.get(currentToken).getValue();
-                currentToken++;
-                if (tokens.get(currentToken).getValue().equals("=")) {
-                    currentToken--; // Retroceder al identificador
+    while (currentToken < tokens.size() && !tokens.get(currentToken).getValue().equals("}")) {
+
+        if (isType(tokens.get(currentToken).getValue())) {
+            RULE_VARIABLE();
+        } else if (tokens.get(currentToken).getType().equals("IDENTIFIER")) {
+            String identifier = tokens.get(currentToken).getValue();
+            currentToken++;
+
+            if (currentToken < tokens.size()) {
+                String nextValue = tokens.get(currentToken).getValue();
+
+                if (nextValue.equals("=")) {
+                    currentToken--; 
                     RULE_ASSIGNMENT();
-                } else if (tokens.get(currentToken).getValue().equals("(")) {
-                    currentToken--; // Retroceder al identificador
+                } else if (nextValue.equals("(")) {
+                    currentToken--; 
                     RULE_CALL_METHOD();
                     match(";");
+                } else {
+                    error("Unexpected token after identifier: '" + nextValue + "'");
                 }
-            } else if (tokens.get(currentToken).getValue().equals("if")) {
-                RULE_IF();
-            } else if (tokens.get(currentToken).getValue().equals("while")) {
-                RULE_WHILE();
-            } else if (tokens.get(currentToken).getValue().equals("do")) {
-                RULE_DO_WHILE();
-            } else if (tokens.get(currentToken).getValue().equals("for")) {
-                RULE_FOR();
-            } else if (tokens.get(currentToken).getValue().equals("switch")) {
-                RULE_SWITCH();
-            } else if (tokens.get(currentToken).getValue().equals("return")) {
-                RULE_RETURN();
-            } else {
-                currentToken++; // Avanzar si hay un token no reconocido
             }
+        } else if (tokens.get(currentToken).getValue().equals("if")) {
+            RULE_IF();
+        } else if (tokens.get(currentToken).getValue().equals("while")) {
+            RULE_WHILE();
+        } else if (tokens.get(currentToken).getValue().equals("return")) {
+            RULE_RETURN();
+        } else if (tokens.get(currentToken).getValue().equals("print")) {
+            RULE_PRINT();
+        } else {
+            error("Unexpected token: '" + tokens.get(currentToken).getValue() + "'");
+            currentToken++;
         }
     }
+}
+
     
     private void RULE_VARIABLE() {
-        System.out.println("-- RULE_VARIABLE");
+        codeGen.setLevel(1);
+
+        String type = tokens.get(currentToken).getValue();
         RULE_TYPE();
-        if (tokens.get(currentToken).getType().equals("IDENTIFIER")) currentToken++;
-        if (tokens.get(currentToken).getValue().equals("=")) {
-            currentToken++;
-            RULE_EXPRESSION();
-        }
-        match(";");
-    }
-    
-    private void RULE_ASSIGNMENT() {
-        System.out.println("-- RULE_ASSIGNMENT");
-        if (tokens.get(currentToken).getType().equals("IDENTIFIER")) currentToken++;
-        match("=");
-        RULE_EXPRESSION();
-        match(";");
-    }
-    
-    private void RULE_EXPRESSION() {
-        System.out.println("--- RULE_EXPRESSION");
-        RULE_X();
-        while (currentToken < tokens.size() && tokens.get(currentToken).getValue().equals("|")) {
-            currentToken++;
-            RULE_X();
-        }
-    }
-    
-    private void RULE_X() {
-        System.out.println("---- RULE_X");
-        RULE_Y();
-        while (currentToken < tokens.size() && tokens.get(currentToken).getValue().equals("&")) {
-            currentToken++;
-            RULE_Y();
-        }
-    }
-    
-    private void RULE_Y() {
-        System.out.println("----- RULE_Y");
-        if (currentToken < tokens.size() && tokens.get(currentToken).getValue().equals("!")) {
-            currentToken++;
-        }
-        RULE_R();
-    }
-    
-    private void RULE_R() {
-        System.out.println("------ RULE_R");
-        RULE_E();
-        while (currentToken < tokens.size() && 
-              (tokens.get(currentToken).getValue().equals("<") ||
-               tokens.get(currentToken).getValue().equals(">") ||
-               tokens.get(currentToken).getValue().equals("=") ||
-               tokens.get(currentToken).getValue().equals("!"))) {
-            currentToken++;
-            if (currentToken < tokens.size() && tokens.get(currentToken).getValue().equals("=")) {
+        if (tokens.get(currentToken).getType().equals("IDENTIFIER")) {
+            String varName = tokens.get(currentToken).getValue();
+            SemanticAnalyzer.CheckVariable(type, varName);
+            
+            if (currentToken + 1 < tokens.size() && tokens.get(currentToken + 1).getValue().equals("=")) {
+                currentToken++; 
+                match("=");
+                RULE_EXPRESSION();
+                codeGen.generateSto(varName);
+            } else {
+                codeGen.generateVariableDeclaration(type, varName, getDefaultValue(type));
                 currentToken++;
             }
-            RULE_E();
+        } else {
+            reportError("Expected variable name");
         }
+        match(";");
+    }
+
+    
+    private void RULE_ASSIGNMENT() {
+        String varName = tokens.get(currentToken).getValue();
+        currentToken++;
+        match("=");
+        RULE_EXPRESSION();
+        codeGen.generateSto(varName);
+        match(";");
     }
     
+
+
+    private void RULE_EXPRESSION() {
+        RULE_REL();
+        while (currentToken < tokens.size() &&
+            (tokens.get(currentToken).getValue().equals("&&") ||
+                tokens.get(currentToken).getValue().equals("||"))) {
+
+            String op = tokens.get(currentToken).getValue();
+            currentToken++;
+            RULE_REL(); 
+            codeGen.generateOpr(op.equals("&&") ? 9 : 8);
+        }
+    }
+
+
+    private void RULE_REL() {
+        RULE_E();
+        while (currentToken < tokens.size() &&
+            (tokens.get(currentToken).getValue().equals(">") ||
+            tokens.get(currentToken).getValue().equals("<") ||
+            tokens.get(currentToken).getValue().equals(">=") ||
+            tokens.get(currentToken).getValue().equals("<=") ||
+            tokens.get(currentToken).getValue().equals("==") ||
+            tokens.get(currentToken).getValue().equals("!="))) {
+
+            String op = tokens.get(currentToken).getValue();
+            currentToken++;
+            RULE_E();
+
+            switch (op) {
+                case ">":  codeGen.generateOpr(15); break;
+                case "<":  codeGen.generateOpr(16); break;
+                case ">=": codeGen.generateOpr(21); break;
+                case "<=": codeGen.generateOpr(22); break;
+                case "==": codeGen.generateOpr(13); break;
+                case "!=": codeGen.generateOpr(14); break;
+            }
+        }
+    }
     private void RULE_E() {
-        System.out.println("------- RULE_E");
         RULE_A();
         while (currentToken < tokens.size() && 
               (tokens.get(currentToken).getValue().equals("+") ||
-               tokens.get(currentToken).getValue().equals("-"))) {
+                   tokens.get(currentToken).getValue().equals("-"))) {
+            
+            String operator = tokens.get(currentToken).getValue();
             currentToken++;
             RULE_A();
+            
+            if (operator.equals("+")) {
+                codeGen.generateOpr(codeGen.ADD);
+            } else if (operator.equals("-")) {
+                codeGen.generateOpr(codeGen.SUB);
+            }
         }
     }
     
     private void RULE_A() {
-        System.out.println("-------- RULE_A");
         RULE_B();
         while (currentToken < tokens.size() && 
               (tokens.get(currentToken).getValue().equals("*") ||
-               tokens.get(currentToken).getValue().equals("/"))) {
+                   tokens.get(currentToken).getValue().equals("/"))) {
+            String operator = tokens.get(currentToken).getValue();
             currentToken++;
             RULE_B();
+            if (operator.equals("*")) {
+                codeGen.generateOpr(4);
+            } else {
+                codeGen.generateOpr(5);
+            }
         }
     }
     
     private void RULE_B() {
-        System.out.println("--------- RULE_B");
         if (currentToken < tokens.size() && tokens.get(currentToken).getValue().equals("-")) {
             currentToken++;
+            RULE_C();
+            codeGen.generateOpr(16);
+        } else {
+            RULE_C();
         }
-        RULE_C();
     }
     
     private void RULE_C() {
-        System.out.println("---------- RULE_C");
         if (currentToken < tokens.size()) {
             if (tokens.get(currentToken).getType().equals("IDENTIFIER")) {
+                String identifier = tokens.get(currentToken).getValue();
                 currentToken++;
                 if (currentToken < tokens.size() && tokens.get(currentToken).getValue().equals("(")) {
                     currentToken--; // Retroceder
                     RULE_CALL_METHOD();
+                } else {
+                    if (!SemanticAnalyzer.variableExists(identifier)) {
+                        SemanticAnalyzer.error("Variable '" + identifier + "' not declared in scope '" + SemanticAnalyzer.getCurrentScope() + "'");
+                    }
+                    codeGen.generateLod(identifier);
+
                 }
             } else if (tokens.get(currentToken).getType().equals("INTEGER") || 
-                       tokens.get(currentToken).getType().equals("FLOAT") ||
-                       tokens.get(currentToken).getType().equals("STRING") ||
-                       tokens.get(currentToken).getType().equals("CHAR") ||
-                       tokens.get(currentToken).getValue().equals("true") ||
-                       tokens.get(currentToken).getValue().equals("false")) {
+                       tokens.get(currentToken).getType().equals("FLOAT")) {
+                codeGen.generateLit(tokens.get(currentToken).getValue());
+                currentToken++;
+            } else if (tokens.get(currentToken).getType().equals("STRING")) {
+                codeGen.generateLit(tokens.get(currentToken).getValue());
+                currentToken++;
+            }
+            else if (tokens.get(currentToken).getValue().equals("true")) {
+                codeGen.generateLit("1");
+                currentToken++;
+            } else if (tokens.get(currentToken).getValue().equals("false")) {
+                codeGen.generateLit("0");
                 currentToken++;
             } else if (tokens.get(currentToken).getValue().equals("(")) {
                 currentToken++;
@@ -237,227 +396,96 @@ public class TheParser {
     }
     
     private void RULE_WHILE() {
-        System.out.println("-- RULE_WHILE");
-        match("while");
-        match("(");
-        RULE_EXPRESSION();
-        match(")");
-        if (tokens.get(currentToken).getValue().equals("{")) {
-            match("{");
-            RULE_BODY();
-            match("}");
-        } else {
-            RULE_STATEMENT();
-        }
-    }
+    match("while");
+    match("(");
+    codeGen.generateWhileStart(); 
+    RULE_EXPRESSION();          
+    codeGen.generateWhileCondition(); 
+    match(")");
+    match("{");
+    RULE_BODY(); 
+    match("}");
+    codeGen.generateWhileEnd();
+}
+
     
     private void RULE_IF() {
-        System.out.println("-- RULE_IF");
         match("if");
         match("(");
         RULE_EXPRESSION();
         match(")");
-        if (tokens.get(currentToken).getValue().equals("{")) {
-            match("{");
+        match("{");
+        codeGen.generateIfStart();
+        while (!tokens.get(currentToken).getValue().equals("}")) {
             RULE_BODY();
-            match("}");
-        } else {
-            RULE_STATEMENT();
         }
-        
+        match("}");
         if (currentToken < tokens.size() && tokens.get(currentToken).getValue().equals("else")) {
+            codeGen.generateElseStart();
             match("else");
-            if (tokens.get(currentToken).getValue().equals("{")) {
-                match("{");
+            match("{");
+            while (!tokens.get(currentToken).getValue().equals("}")) {
                 RULE_BODY();
-                match("}");
-            } else {
-                RULE_STATEMENT();
             }
+            match("}");
+            codeGen.generateElseEnd();
+        } else {
+            codeGen.generateIfEnd();
         }
     }
+
     
+
     private void RULE_RETURN() {
-        System.out.println("-- RULE_RETURN");
         match("return");
         if (!tokens.get(currentToken).getValue().equals(";")) {
             RULE_EXPRESSION();
         }
+        codeGen.generateReturn();
         match(";");
     }
     
     private void RULE_CALL_METHOD() {
-        System.out.println("-- RULE_CALL_METHOD");
-        if (tokens.get(currentToken).getType().equals("IDENTIFIER")) currentToken++;
+        String methodName = "";
+        if (tokens.get(currentToken).getType().equals("IDENTIFIER")) {
+            methodName = tokens.get(currentToken).getValue();
+            currentToken++;
+        }
         match("(");
         if (!tokens.get(currentToken).getValue().equals(")")) {
             RULE_PARAM_VALUES();
         }
         match(")");
+        codeGen.addInstruction("call " + methodName);
     }
     
     private void RULE_PARAM_VALUES() {
-        System.out.println("-- RULE_PARAM_VALUES");
         RULE_EXPRESSION();
-        while (currentToken < tokens.size() && tokens.get(currentToken).getValue().equals(",")) {
+        while (tokens.get(currentToken).getValue().equals(",")) {
             currentToken++;
             RULE_EXPRESSION();
         }
     }
     
-    private void RULE_DO_WHILE() {
-        System.out.println("-- RULE_DO_WHILE");
-        match("do");
-        if (tokens.get(currentToken).getValue().equals("{")) {
-            match("{");
-            RULE_BODY();
-            match("}");
-        } else {
-            RULE_STATEMENT();
-        }
-        match("while");
+    private void RULE_PRINT() {
+        match("print");
         match("(");
         RULE_EXPRESSION();
+        codeGen.generateOpr(21);
         match(")");
         match(";");
     }
     
-    private void RULE_FOR() {
-        System.out.println("-- RULE_FOR");
-        match("for");
-        match("(");
-        
-        // Inicialización (opcional)
-        if (!tokens.get(currentToken).getValue().equals(";")) {
-            if (isType(tokens.get(currentToken).getValue())) {
-                RULE_TYPE();
-                if (tokens.get(currentToken).getType().equals("IDENTIFIER")) currentToken++;
-                if (tokens.get(currentToken).getValue().equals("=")) {
-                    currentToken++;
-                    RULE_EXPRESSION();
-                }
-            } else if (tokens.get(currentToken).getType().equals("IDENTIFIER")) {
-                currentToken++;
-                if (tokens.get(currentToken).getValue().equals("=")) {
-                    currentToken++;
-                    RULE_EXPRESSION();
-                }
-            }
-        }
-        match(";");
-        
-        // Condición (opcional)
-        if (!tokens.get(currentToken).getValue().equals(";")) {
-            RULE_EXPRESSION();
-        }
-        match(";");
-        
-        // Incremento (opcional)
-        if (!tokens.get(currentToken).getValue().equals(")")) {
-            if (tokens.get(currentToken).getType().equals("IDENTIFIER")) {
-                currentToken++;
-                if (tokens.get(currentToken).getValue().equals("=")) {
-                    currentToken++;
-                    RULE_EXPRESSION();
-                }
-            }
-        }
-        match(")");
-        
-        // Cuerpo
-        if (tokens.get(currentToken).getValue().equals("{")) {
-            match("{");
-            RULE_BODY();
-            match("}");
-        } else {
-            RULE_STATEMENT();
-        }
-    }
-    
-    private void RULE_SWITCH() {
-        System.out.println("-- RULE_SWITCH");
-        match("switch");
-        match("(");
-        RULE_EXPRESSION();
-        match(")");
-        match("{");
-        
-        // Procesar casos
-        while (currentToken < tokens.size() && 
-              (tokens.get(currentToken).getValue().equals("case") || 
-               tokens.get(currentToken).getValue().equals("default"))) {
-            if (tokens.get(currentToken).getValue().equals("case")) {
-                match("case");
-                // Avanzar hasta el :
-                while (currentToken < tokens.size() && !tokens.get(currentToken).getValue().equals(":")) {
-                    currentToken++;
-                }
-                match(":");
-            } else { 
-                match("default");
-                match(":");
-            }
-            
-            // Procesar el cuerpo del caso
-            while (currentToken < tokens.size() && 
-                  !tokens.get(currentToken).getValue().equals("case") && 
-                  !tokens.get(currentToken).getValue().equals("default") && 
-                  !tokens.get(currentToken).getValue().equals("}")) {
-                RULE_STATEMENT();
-            }
-        }
-        match("}");
-    }
-    
-    // Para instrucciones individuales (if/while sin llaves)
-    private void RULE_STATEMENT() {
-        System.out.println("-- RULE_STATEMENT");
-        if (isType(tokens.get(currentToken).getValue())) {
-            RULE_VARIABLE();
-        } else if (tokens.get(currentToken).getType().equals("IDENTIFIER")) {
-            currentToken++;
-            if (currentToken < tokens.size() && tokens.get(currentToken).getValue().equals("=")) {
-                currentToken--; // Retroceder
-                RULE_ASSIGNMENT();
-            } else if (currentToken < tokens.size() && tokens.get(currentToken).getValue().equals("(")) {
-                currentToken--; // Retroceder
-                RULE_CALL_METHOD();
-                match(";");
-            }
-        } else if (tokens.get(currentToken).getValue().equals("if")) {
-            RULE_IF();
-        } else if (tokens.get(currentToken).getValue().equals("while")) {
-            RULE_WHILE();
-        } else if (tokens.get(currentToken).getValue().equals("do")) {
-            RULE_DO_WHILE();
-        } else if (tokens.get(currentToken).getValue().equals("for")) {
-            RULE_FOR();
-        } else if (tokens.get(currentToken).getValue().equals("switch")) {
-            RULE_SWITCH();
-        } else if (tokens.get(currentToken).getValue().equals("return")) {
-            RULE_RETURN();
-        } else if (tokens.get(currentToken).getValue().equals("break") || 
-                 tokens.get(currentToken).getValue().equals("continue")) {
-            currentToken++;
-            match(";");
-        } else {
-            currentToken++; // Avanzar si hay un token no reconocido
-        }
-    }
-    
-    // Método auxiliar para consumir un token esperado
     private void match(String expected) {
         if (currentToken < tokens.size() && tokens.get(currentToken).getValue().equals(expected)) {
             currentToken++;
-            System.out.println("- " + expected);
         } else {
-            error("Expected: " + expected);
+            reportError("Expected '" + expected + "' but found '" + 
+                       (currentToken < tokens.size() ? tokens.get(currentToken).getValue() : "EOF") + "'");
         }
     }
     
-    private void error(String message) {
-        System.out.println("Error: " + message + " at token: " + 
-            (currentToken < tokens.size() ? tokens.get(currentToken).getValue() : "End of input"));
-        System.exit(1);
+    private void error(String errorCode) {
+        reportError("Syntax error: " + errorCode);
     }
 }

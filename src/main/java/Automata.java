@@ -1,12 +1,13 @@
 import java.util.*;
 
 /**
- * Automata class represent a DFA.
- * This version is implemented with a HashMap to store the transition table.
  *
- * @author javiergs
- * @version 1.0
+ * @author GABRIEL ZAID
+ *         ISAC HUMBERTO
+ *         BRANDON MAGANA
+ * @version 0.5
  */
+
 public class Automata {
 	
 	private final HashMap<String, String> table = new HashMap<>();
